@@ -1,5 +1,5 @@
 // cf-mediathek-mrss 1.2.0 — MRSS with variant exclusion and canonical deduplication.
-const VERSION = '1.2.0';
+const VERSION = '1.3.0';
 const PROVIDERS = {
   arte: { label: 'ARTE', query: '!ARTE >30' },
   '3sat': { label: '3sat', query: '!3sat >30' },
@@ -26,6 +26,15 @@ const mediaExt = /\.(?:mp4|m4v|webm|m3u8|mpd)(?:[?#]|$)/i;
 const integer = v => /^\d+$/.test(String(v ?? '').trim()) && Number(v)>0 && Number(v)<=9999 ? Number(v) : null;
 const seasonInt = v => /^\d+$/.test(String(v ?? '').trim()) && Number(v)>=0 && Number(v)<=9999 ? Number(v) : null;
 const pad2 = n => String(n).padStart(2,'0');
+function parseDuration(v) {
+  const value=String(v||'').trim();
+  if(/^\d{1,6}$/.test(value))return Number(value)<=864000?Number(value):null;
+  if(!/^\d{1,3}:\d{2}(?::\d{2})?$/.test(value))return null;
+  const p=value.split(':').map(Number);
+  if(p.slice(1).some(x=>x>59))return null;
+  const n=p.length===3?p[0]*3600+p[1]*60+p[2]:p[0]*60+p[1];
+  return n<=864000?n:null;
+}
 const clean = (s, max=125) => String(s??'').normalize('NFKC').replace(/[<>:"/\\|?*\u0000-\u001f]/g,' ').replace(/\s+/g,' ').replace(/[. ]+$/g,'').trim().slice(0,max).replace(/[. ]+$/g,'').trim();
 const generic = /^(?:doku(?:mentation)?|reportage|politik|gesellschaft|nachrichten|news|videos?|filme?|serien?|sonstiges|wissen|history|geschichte|kultur|natur|sport|aktuelles|podcast)$/i;
 const lang = value => {
@@ -195,7 +204,8 @@ function parse(xml,provider,mode='emby') {
     const link=validHttp(tag(b,'websiteUrl')) || plainLink;
     const guid=tag(b,'guid')||tag(b,'id')||link||raw;
     const date=tag(b,'pubDate')||tag(b,'published')||tag(b,'updated');
-    return enrich({originalTitle,description,link,guid,playable,thumb,date,provider},b,mode);
+    const durationSeconds=parseDuration(attr(media,'duration')||tag(b,'itunes:duration')||tag(b,'duration'));
+    return enrich({originalTitle,description,link,guid,playable,thumb,date,provider,durationSeconds},b,mode);
   }).filter(x=>x && x.originalTitle && (x.link||x.playable));
   return {items,filteredVariants};
 }
@@ -209,18 +219,95 @@ function xmlFeed(items,title,base) {
   const body=items.map(x=>`<item><title>${esc(x.displayTitle)}</title><guid isPermaLink="false">${esc(x.guid)}</guid>${x.link?`<link>${esc(x.link)}</link>`:''}<description>${esc(x.description)}</description>${Number.isFinite(Date.parse(x.date))?`<pubDate>${new Date(x.date).toUTCString()}</pubDate>`:''}<category>${esc(x.provider)}</category>${x.category?`<category>${esc(x.category)}</category>`:''}<dc:language>${esc(x.language)}</dc:language><emby:languageSource>${x.languageSource}</emby:languageSource><emby:audioVerified>false</emby:audioVerified><emby:filename>${esc(x.filename)}</emby:filename><emby:relativePath>${esc(x.relativePath)}</emby:relativePath>${x.series?`<emby:series>${esc(x.series)}</emby:series>`:''}${x.season!==null?`<emby:season>${x.season}</emby:season>`:''}${x.episode?`<emby:episode>${x.episode}</emby:episode>`:''}<media:title>${esc(x.displayTitle)}</media:title>${x.thumb?`<media:thumbnail url="${esc(x.thumb)}"/>`:''}${x.playable?`<enclosure url="${esc(x.playable)}" type="${mimeOf(x.playable)}"/><media:content url="${esc(x.playable)}" type="${mimeOf(x.playable)}" medium="video"/>`:''}</item>`).join('');
   return `<?xml version="1.0" encoding="UTF-8"?><rss version="2.0" xmlns:media="http://search.yahoo.com/mrss/" xmlns:dc="http://purl.org/dc/elements/1.1/" xmlns:emby="urn:cf-mediathek-mrss:emby:1"><channel><title>${esc(title)}</title><link>${esc(base)}</link><description>Aggregierter Mediathek-Feed; Audio-Sprache nicht verifiziert; STRM-Dateinamen sind Vorschläge.</description><language>de-DE</language><lastBuildDate>${new Date().toUTCString()}</lastBuildDate>${body}</channel></rss>`;
 }
+
+function filtersFrom(p) {
+  const o={q:(p.get('q')||'').trim(),category:(p.get('category')||'').trim(),
+    language:p.get('language')||'',languageSource:p.get('languageSource')||'',
+    playableOnly:p.get('playableOnly')||'false',sort:p.get('sort')||'date',
+    order:p.get('order')||'desc',from:p.get('from')||'',to:p.get('to')||'',
+    minDuration:p.get('minDuration')||'',maxDuration:p.get('maxDuration')||''};
+  if(o.q.length>200||o.category.length>100)return {error:'q max 200 chars, category max 100 chars'};
+  if(o.language&&(!lang(o.language)||lang(o.language)!==o.language))return {error:'language must be an ISO language code, e.g. de'};
+  if(!['','source','assumed'].includes(o.languageSource))return {error:'Invalid languageSource'};
+  if(!['true','false','0','1'].includes(o.playableOnly))return {error:'Invalid playableOnly'};
+  if(!['date','title','duration'].includes(o.sort)||!['asc','desc'].includes(o.order))return {error:'Invalid sort or order'};
+  const validDate=d=>!d||(/^\d{4}-\d{2}-\d{2}$/.test(d)&&!Number.isNaN(Date.parse(d+'T00:00:00Z'))&&new Date(d+'T00:00:00Z').toISOString().slice(0,10)===d);
+  if(!validDate(o.from)||!validDate(o.to)||(o.from&&o.to&&o.from>o.to))return {error:'Invalid from/to date'};
+  for(const k of ['minDuration','maxDuration'])if(o[k]&&!(/^\d+$/.test(o[k])&&Number(o[k])<=864000))return {error:'Invalid '+k};
+  if(o.minDuration&&o.maxDuration&&Number(o.minDuration)>Number(o.maxDuration))return {error:'minDuration exceeds maxDuration'};
+  o.playableOnly=['true','1'].includes(o.playableOnly);
+  o.minDuration=o.minDuration===''?null:Number(o.minDuration);
+  o.maxDuration=o.maxDuration===''?null:Number(o.maxDuration);
+  return o;
+}
+function filterSort(items,o) {
+  const terms=normalizeText(o.q).split(/\s+/).filter(Boolean);
+  const category=normalizeText(o.category);
+  const filtered=items.filter(x=>{
+    const all=normalizeText([x.originalTitle,x.description,x.series,x.category,x.provider].join(' '));
+    if(!terms.every(t=>all.includes(t)))return false;
+    if(category&&!normalizeText(x.category).includes(category))return false;
+    if(o.language&&x.language!==o.language)return false;
+    if(o.languageSource&&x.languageSource!==o.languageSource)return false;
+    if(o.playableOnly&&!x.playable)return false;
+    if(o.minDuration!==null&&(x.durationSeconds===null||x.durationSeconds<o.minDuration))return false;
+    if(o.maxDuration!==null&&(x.durationSeconds===null||x.durationSeconds>o.maxDuration))return false;
+    if(o.from||o.to) {
+      const ms=Date.parse(x.date);
+      if(!Number.isFinite(ms))return false;
+      const date=new Date(ms).toISOString().slice(0,10);
+      if(o.from&&date<o.from||o.to&&date>o.to)return false;
+    }
+    return true;
+  });
+  return filtered.sort((a,b)=>{
+    let n=o.sort==='title'?a.originalTitle.localeCompare(b.originalTitle,'de')
+      :o.sort==='duration'?(a.durationSeconds??-1)-(b.durationSeconds??-1)
+      :(Date.parse(a.date)||0)-(Date.parse(b.date)||0);
+    return (o.order==='asc'?1:-1)*n||a.originalTitle.localeCompare(b.originalTitle,'de');
+  });
+}
+function searchItem(x) {
+  return {title:x.originalTitle,displayTitle:x.displayTitle,provider:x.provider,category:x.category,
+    description:x.description,date:x.date,series:x.series,season:x.season,episode:x.episode,
+    language:x.language,languageSource:x.languageSource,audioVerified:false,durationSeconds:x.durationSeconds,
+    link:x.link,playableUrl:x.playable||null,thumbnail:x.thumb||null,
+    filename:x.filename,relativePath:x.relativePath};
+}
+function searchHtml(p,items,stats) {
+  const input=(n,label,type='text')=>'<label>'+esc(label)+'<input type="'+type+'" name="'+n+'" value="'+esc(p.get(n)||'')+'"></label>';
+  const form='<form action="/search" method="get"><input type="hidden" name="format" value="html">'+
+    input('q','Suche')+input('providers','Provider (arte,3sat,ndr)')+
+    input('category','Kategorie')+input('language','Sprache (de)')+
+    input('from','Von','date')+input('to','Bis','date')+
+    input('minDuration','Min. Sekunden','number')+input('maxDuration','Max. Sekunden','number')+
+    '<label>Nur direkt abspielbar <select name="playableOnly"><option value="false">Nein</option><option value="true"'+(p.get('playableOnly')==='true'?' selected':'')+'>Ja</option></select></label>'+
+    '<label>Sortieren <select name="sort"><option value="date">Datum</option><option value="title"'+(p.get('sort')==='title'?' selected':'')+'>Titel</option><option value="duration"'+(p.get('sort')==='duration'?' selected':'')+'>Laufzeit</option></select></label>'+
+    '<label>Reihenfolge <select name="order"><option value="desc">Absteigend</option><option value="asc"'+(p.get('order')==='asc'?' selected':'')+'>Aufsteigend</option></select></label>'+
+    input('limit','Maximale Ergebnisse','number')+'<button>Suchen</button></form>';
+  const qs=new URLSearchParams(p);qs.delete('format');
+  const result=items===null?'':'<h2>'+stats.returned+' von '+stats.totalMatched+' Treffern</h2><p><a href="/mrss?'+esc(qs.toString())+'">MRSS öffnen</a></p>'+
+    items.map(x=>'<article><strong>'+esc(x.displayTitle)+'</strong><p>'+esc(x.provider)+' · '+esc(x.category||'')+' · '+esc(x.date||'')+'</p><p>'+esc(x.description.slice(0,250))+'</p>'+(x.link?'<a href="'+esc(x.link)+'">Quelle</a>':'')+'</article>').join('');
+  return '<!doctype html><html lang="de"><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1"><title>Mediathek MRSS Suche</title><style>body{font:16px system-ui;max-width:1000px;margin:2rem auto;padding:1rem}form{display:grid;grid-template-columns:repeat(auto-fit,minmax(200px,1fr));gap:12px}label{display:grid;gap:5px}input,select,button{padding:8px}article{border-bottom:1px solid #ccc;padding:1rem 0}</style><h1>Mediathek MRSS – Suche & Filter</h1><p>Filter gelten für aktuell gelieferte RSS-Einträge. Deutscher Ton wird nicht verifiziert.</p>'+form+result+'</html>';
+}
+
 const json=(value,status=200)=>Response.json(value,{status,headers:{'access-control-allow-origin':'*'}});
 export default {async fetch(request){
   const url=new URL(request.url);
   if(url.pathname==='/health')return json({ok:true,service:'mediathek-mrss',version:VERSION,providers:Object.keys(PROVIDERS).length,variantPolicy:'exclude',deduplication:'canonical-title-and-episode'});
   if(url.pathname==='/providers')return json(PROVIDERS);
-  if(url.pathname!=='/mrss'&&!url.pathname.startsWith('/mrss/'))return new Response('Use /providers, /mrss or /mrss/{provider}',{status:404});
+  if(url.pathname==='/')return new Response(searchHtml(url.searchParams,null,null),{headers:{'content-type':'text/html; charset=utf-8'}});
+  const isSearch=url.pathname==='/search';
+  if(!isSearch&&url.pathname!=='/mrss'&&!url.pathname.startsWith('/mrss/'))return new Response('Use /, /search, /providers, /mrss or /mrss/{provider}',{status:404});
   const selected=url.pathname.startsWith('/mrss/')?[url.pathname.slice(6).toLowerCase()]:url.searchParams.get('providers')?.toLowerCase().split(',').map(x=>x.trim()).filter(Boolean)||Object.keys(PROVIDERS);
   if(!selected.length||selected.length>12||selected.some(n=>!PROVIDERS[n]))return json({error:'Invalid provider',available:Object.keys(PROVIDERS)},400);
   const mode=url.searchParams.get('naming')||'emby';
   if(!['emby','original'].includes(mode))return json({error:'Invalid naming: use emby or original'},400);
   const rawLimit=url.searchParams.get('limit')||'250';
   if(!/^\d+$/.test(rawLimit)||Number(rawLimit)<1||Number(rawLimit)>500)return json({error:'limit must be between 1 and 500'},400);
+  const opts=filtersFrom(url.searchParams);
+  if(opts.error)return json({error:opts.error},400);
+  if(isSearch&&!['json','html'].includes(url.searchParams.get('format')||'json'))return json({error:'format must be json or html'},400);
   const datasets=await Promise.all(selected.map(async key=>{try {
     const feedUrl='https://mediathekviewweb.de/feed?query='+encodeURIComponent(PROVIDERS[key].query);
     const controller=new AbortController();const timeout=setTimeout(()=>controller.abort(),10000);
@@ -232,7 +319,13 @@ export default {async fetch(request){
   if(datasets.every(d=>!d.ok))return json({error:'All upstream RSS feeds failed',sources:datasets.map(({key,error})=>({key,error}))},502);
   const allItems=datasets.flatMap(d=>d.items);
   const merged=mergeItems(allItems);
-  const items=merged.items.sort((a,b)=>(Date.parse(b.date)||0)-(Date.parse(a.date)||0)).slice(0,Number(rawLimit));
+  const matched=filterSort(merged.items,opts);
+  const items=matched.slice(0,Number(rawLimit));
   const filteredVariants=datasets.reduce((total,d)=>total+(d.filteredVariants||0),0);
-  return new Response(xmlFeed(items,'Mediathek MRSS – '+selected.map(n=>PROVIDERS[n].label).join(', '),url.origin+url.pathname),{headers:{'content-type':'application/rss+xml; charset=utf-8','access-control-allow-origin':'*','cache-control':'public, max-age=300','x-feed-items':String(items.length),'x-filtered-variants':String(filteredVariants),'x-removed-duplicates':String(merged.duplicates),'x-failed-sources':datasets.filter(d=>!d.ok).map(d=>d.key).join(',')}});
+  const stats={totalMatched:matched.length,returned:items.length,filteredVariants,removedDuplicates:merged.duplicates,failedSources:datasets.filter(d=>!d.ok).map(d=>d.key)};
+  if(isSearch){
+    if(url.searchParams.get('format')==='html')return new Response(searchHtml(url.searchParams,items,stats),{headers:{'content-type':'text/html; charset=utf-8'}});
+    return json({query:{providers:selected,...opts},...stats,items:items.map(searchItem)});
+  }
+  return new Response(xmlFeed(items,'Mediathek MRSS – '+selected.map(n=>PROVIDERS[n].label).join(', '),url.origin+url.pathname),{headers:{'content-type':'application/rss+xml; charset=utf-8','access-control-allow-origin':'*','cache-control':'public, max-age=300','x-feed-items':String(items.length),'x-total-matched':String(matched.length),'x-filtered-variants':String(filteredVariants),'x-removed-duplicates':String(merged.duplicates),'x-failed-sources':datasets.filter(d=>!d.ok).map(d=>d.key).join(',')}});
 }};
