@@ -300,7 +300,7 @@ export default {async fetch(request){
   const isSearch=url.pathname==='/search';
   if(!isSearch&&url.pathname!=='/mrss'&&!url.pathname.startsWith('/mrss/'))return new Response('Use /, /search, /providers, /mrss or /mrss/{provider}',{status:404});
   const selected=url.pathname.startsWith('/mrss/')?[url.pathname.slice(6).toLowerCase()]:url.searchParams.get('providers')?.toLowerCase().split(',').map(x=>x.trim()).filter(Boolean)||Object.keys(PROVIDERS);
-  if(!selected.length||selected.length>12||selected.some(n=>!PROVIDERS[n]))return json({error:'Invalid provider',available:Object.keys(PROVIDERS)},400);
+  if(!selected.length||selected.length>12||selected.some(n=>!Object.hasOwn(PROVIDERS,n)))return json({error:'Invalid provider',available:Object.keys(PROVIDERS)},400);
   const mode=url.searchParams.get('naming')||'emby';
   if(!['emby','original'].includes(mode))return json({error:'Invalid naming: use emby or original'},400);
   const rawLimit=url.searchParams.get('limit')||'250';
