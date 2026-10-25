@@ -1,0 +1,155 @@
+openapi: 3.1.1
+info:
+  title: Mediathek MRSS Aggregator
+  version: 1.2.0
+  description: Aggregiert Mediathek-RSS in MRSS, filtert Original- und barrierefreie Sonderfassungen und entfernt inhaltsgleiche Dubletten.
+servers:
+  - url: https://cf-mediathek-mrss.bcgd1.workers.dev
+    description: Geplante Adresse. Worker muss zuerst bereitgestellt werden.
+tags:
+  - name: Feeds
+  - name: Service
+paths:
+  /health:
+    get:
+      tags: [Service]
+      operationId: getHealth
+      summary: Gesundheitsstatus und Version
+      responses:
+        '200':
+          description: Status des Worker-Prozesses.
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  ok: {type: boolean}
+                  service: {type: string}
+                  version: {type: string}
+                  providers: {type: integer}
+                  variantPolicy: {type: string}
+                  deduplication: {type: string}
+              example:
+                ok: true
+                service: mediathek-mrss
+                version: 1.2.0
+                providers: 12
+  /providers:
+    get:
+      tags: [Service]
+      operationId: listProviders
+      summary: Verfügbare Senderquellen
+      responses:
+        '200':
+          description: Provider mit Namen und Suchfiltern.
+          content:
+            application/json:
+              schema:
+                type: object
+                additionalProperties:
+                  type: object
+                  properties:
+                    label: {type: string}
+                    query: {type: string}
+              example:
+                arte: {label: ARTE, query: '!ARTE >30'}
+                '3sat': {label: 3sat, query: '!3sat >30'}
+  /mrss:
+    get:
+      tags: [Feeds]
+      operationId: getAggregatedMrss
+      summary: MRSS aus mehreren Providern
+      description: Entfernt OV/OmU, AD, SDH/UT und DGS, dedupliziert nach Titel, Episode und URL. Ohne belegte Episode wird kein SxxExx erfunden.
+      parameters:
+        - $ref: '#/components/parameters/Providers'
+        - $ref: '#/components/parameters/Limit'
+        - $ref: '#/components/parameters/Naming'
+      responses:
+        '200':
+          $ref: '#/components/responses/Mrss'
+        '400':
+          description: Ungültige Parameter.
+        '502':
+          description: Kein Quellfeed erreichbar.
+  /mrss/{provider}:
+    get:
+      tags: [Feeds]
+      operationId: getProviderMrss
+      summary: MRSS eines einzelnen Providers
+      parameters:
+        - name: provider
+          in: path
+          required: true
+          description: Schlüssel aus GET /providers.
+          schema:
+            type: string
+            example: arte
+        - $ref: '#/components/parameters/Limit'
+        - $ref: '#/components/parameters/Naming'
+      responses:
+        '200':
+          $ref: '#/components/responses/Mrss'
+        '400':
+          description: Unbekannter Provider oder ungültiger Parameter.
+        '502':
+          description: Quellfeed nicht erreichbar.
+components:
+  parameters:
+    Providers:
+      name: providers
+      in: query
+      description: Kommagetrennte Auswahl. Ohne Angabe alle 12 Provider.
+      schema:
+        type: string
+        example: arte,3sat,ndr
+    Limit:
+      name: limit
+      in: query
+      description: Maximale Zahl ausgegebener eindeutiger Einträge.
+      schema:
+        type: integer
+        minimum: 1
+        maximum: 500
+        default: 250
+        example: 100
+    Naming:
+      name: naming
+      in: query
+      description: emby setzt formatierte Titel, original erhält Quelltitel. emby:filename wird immer ausgegeben.
+      schema:
+        type: string
+        enum: [emby, original]
+        default: emby
+        example: emby
+  responses:
+    Mrss:
+      description: Bereinigter RSS-2.0-Feed mit MRSS-, Dublin-Core- und Emby-Metadaten. STRM-Pfade sind Vorschläge.
+      headers:
+        x-feed-items:
+          description: Zahl der Einträge im MRSS.
+          schema: {type: integer}
+        x-filtered-variants:
+          description: Wegen Sonderfassungs-Markierungen verworfene Beiträge.
+          schema: {type: integer}
+        x-removed-duplicates:
+          description: Nach Normalisierung zusammengeführte Duplikate.
+          schema: {type: integer}
+        x-failed-sources:
+          description: Kommagetrennte IDs fehlgeschlagener Quellen.
+          schema: {type: string}
+      content:
+        application/rss+xml:
+          schema:
+            type: string
+          example: |-
+            <?xml version="1.0" encoding="UTF-8"?>
+            <rss version="2.0" xmlns:media="http://search.yahoo.com/mrss/" xmlns:dc="http://purl.org/dc/elements/1.1/" xmlns:emby="urn:cf-mediathek-mrss:emby:1">
+              <channel><title>Mediathek MRSS – ARTE</title><item>
+              <title>Beispielserie - S02E03 - Die Suche</title>
+              <dc:language>de</dc:language><emby:languageSource>assumed</emby:languageSource>
+              <emby:audioVerified>false</emby:audioVerified>
+              <emby:series>Beispielserie</emby:series><emby:season>2</emby:season><emby:episode>3</emby:episode>
+              <emby:filename>Beispielserie - S02E03 - Die Suche.strm</emby:filename>
+              <emby:relativePath>Beispielserie/Season 02/Beispielserie - S02E03 - Die Suche.strm</emby:relativePath>
+              </item></channel>
+            </rss>
