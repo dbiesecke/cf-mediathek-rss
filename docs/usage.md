@@ -129,3 +129,8 @@ curl 'https://cf-mediathek-mrss.bcgd1.workers.dev/search?providers=ndr,wdr&q=Dok
 Die Suche verwendet **nur Einträge im aktuell geladenen Quell-RSS**, nicht das vollständige Archiv. Dubletten und ausgeschlossene Sonderfassungen werden **vor** der Suche und vor dem Ergebnislimit entfernt. `/search` meldet `totalMatched`, `returned`, `filteredVariants`, `removedDuplicates` und `failedSources`. Bei MRSS liefert der Header `x-total-matched` die Trefferzahl vor dem Limit.
 
 Die Sprachmetadaten können auf `de` angenommen sein. `languageSource=source` grenzt auf explizite RSS-Angaben ein, verifiziert aber keine Audiospur. Laufzeiten werden aus `media:content duration`, `itunes:duration` und `duration` gelesen; fehlende Laufzeiten werden bei Dauerfiltern ausgeschlossen.
+
+
+## Deploy to Cloudflare
+
+Der offizielle [Deploy to Cloudflare Button](https://deploy.workers.cloudflare.com/?url=https://github.com/dbiesecke/cf-mediathek-rss) ist in der [README](../README.md) eingebunden. Cloudflare importiert öffentlich zugängliche Git-Repositories in einen neuen Projekt-Workflow. **Das bestehende Repository ist privat**; der Button funktioniert dafür erst nach Freigabe als öffentliches Repository. Alternativ aus lokalem Checkout `npx wrangler deploy` verwenden. Der Button deployt nicht automatisch in ein bestehendes Projekt.
