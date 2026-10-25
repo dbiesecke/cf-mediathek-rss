@@ -1,5 +1,9 @@
 # Mediathek MRSS – Cloudflare Worker
 
+[![Deploy to Cloudflare](https://deploy.workers.cloudflare.com/button)](https://deploy.workers.cloudflare.com/?url=https://github.com/dbiesecke/cf-mediathek-rss)
+
+> **Hinweis:** Der One-Click-Deploy-Button benötigt ein öffentlich zugängliches Repository. Solange dieses Repository privat ist, kann Cloudflare die Vorlage darüber nicht importieren. Für private Repositories `npx wrangler deploy` verwenden.
+
 Version **1.3.0**. Aggregiert öffentliche MediathekViewWeb-RSS-Suchfeeds für **Emby** und **MediaStationX**.
 
 - 12 Provider, frei kombinierbar; kanonische Duplikatprüfung über Serien-/Episodenmetadaten, normalisierte Titel und Medien-URLs.
