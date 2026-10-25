@@ -1,6 +1,6 @@
 # Nutzung: cf-mediathek-mrss
 
-Version **1.2.0** – Emby-/MediaStationX-MRSS aus öffentlichen MediathekViewWeb-RSS-Suchfeeds.
+Version **1.3.0** – Emby-/MediaStationX-MRSS aus öffentlichen MediathekViewWeb-RSS-Suchfeeds.
 
 ## Routen
 
@@ -101,3 +101,31 @@ curl 'https://cf-mediathek-mrss.bcgd1.workers.dev/mrss?providers=arte,3sat,ndr&l
 ```
 
 Diese Adressen erst **nach dem Deployment** verwenden. Beim Export `.strm`-Datei mit dem Inhalt der tatsächlichen `media:content`-URL erstellen; Webseiten-Links nicht als Media-Streams deklarieren.
+## Suche und Filter (v1.3.0)
+
+Die Filter gelten für `/mrss`, `/mrss/{provider}` und `/search`. Unter `/` gibt es ein Suchformular. `/search` liefert JSON, mit `format=html` eine HTML-Ergebnisliste.
+
+| Parameter | Funktion | Beispiel |
+|---|---|---|
+| `q` | Volltext: Titel, Beschreibung, Serie, Kategorie und Provider | `q=Geschichte` |
+| `providers` | Mehrere Sender | `providers=arte,3sat,ndr` |
+| `category` | Kategorie-Teilstring | `category=Wissenschaft` |
+| `language` | ISO-Sprachmetadatum (keine Audiospurprüfung) | `language=de` |
+| `languageSource` | Herkunft: `source` oder `assumed` | `languageSource=source` |
+| `playableOnly` | Nur direkte Medienadressen | `playableOnly=true` |
+| `minDuration`, `maxDuration` | Dauer in Sekunden (unbekannte Dauer entfällt) | `minDuration=1200` |
+| `from`, `to` | Datumsintervall inklusiv | `from=2026-10-01` |
+| `sort`, `order` | `date`, `title` oder `duration`; `asc`/`desc` | `sort=title&order=asc` |
+| `limit` | Maximal 500 Ergebnisse | `limit=100` |
+
+### Beispiele (nach Deployment)
+
+```bash
+curl 'https://cf-mediathek-mrss.bcgd1.workers.dev/mrss/arte?q=Geschichte&minDuration=1200&sort=date&order=desc'
+curl 'https://cf-mediathek-mrss.bcgd1.workers.dev/search?providers=arte,3sat&q=Natur&category=Wissenschaft&limit=25'
+curl 'https://cf-mediathek-mrss.bcgd1.workers.dev/search?providers=ndr,wdr&q=Doku&format=html'
+```
+
+Die Suche verwendet **nur Einträge im aktuell geladenen Quell-RSS**, nicht das vollständige Archiv. Dubletten und ausgeschlossene Sonderfassungen werden **vor** der Suche und vor dem Ergebnislimit entfernt. `/search` meldet `totalMatched`, `returned`, `filteredVariants`, `removedDuplicates` und `failedSources`. Bei MRSS liefert der Header `x-total-matched` die Trefferzahl vor dem Limit.
+
+Die Sprachmetadaten können auf `de` angenommen sein. `languageSource=source` grenzt auf explizite RSS-Angaben ein, verifiziert aber keine Audiospur. Laufzeiten werden aus `media:content duration`, `itunes:duration` und `duration` gelesen; fehlende Laufzeiten werden bei Dauerfiltern ausgeschlossen.
