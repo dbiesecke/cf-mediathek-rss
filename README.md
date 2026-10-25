@@ -1,6 +1,6 @@
 # Mediathek MRSS – Cloudflare Worker
 
-Version **1.2.0**. Aggregiert öffentliche MediathekViewWeb-RSS-Suchfeeds für **Emby** und **MediaStationX**.
+Version **1.3.0**. Aggregiert öffentliche MediathekViewWeb-RSS-Suchfeeds für **Emby** und **MediaStationX**.
 
 - 12 Provider, frei kombinierbar; kanonische Duplikatprüfung über Serien-/Episodenmetadaten, normalisierte Titel und Medien-URLs.
 - Filter für ausdrücklich gekennzeichnete OV/OmU-, Hörfassungs-, AD-, UT-/SDH- und Gebärdensprachversionen.
@@ -34,3 +34,12 @@ Der Filter ist bewusst konservativ und erkennt nur gekennzeichnete Versionen;
 fehlende Quellenmetadaten können zu nicht erkannten Varianten führen.
 
 Weitere Details und Beispiele: [docs/usage.md](docs/usage.md). API: [openapi.yaml](openapi.yaml) (OpenAPI 3.1.1).
+## Suche und Filter
+
+- `/`: HTML-Suchformular.
+- `/search`: JSON-Resultate oder `?format=html` für HTML.
+- `/mrss`: Filter und Volltextsuche direkt als MRSS.
+
+Beispiel: `/mrss?providers=arte,ndr&q=Geschichte&minDuration=1200&sort=date&limit=100`.
+
+Weitere Details in [docs/usage.md](docs/usage.md).
